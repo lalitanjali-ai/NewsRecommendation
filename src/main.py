@@ -26,7 +26,7 @@ def train(rank, args):
     else:
         is_distributed = True
 
-    if is_distribnum_words_titleuted:
+    if is_distributed:
         utils.setuplogger()
         dist.init_process_group('nccl', world_size=args.nGPU, init_method='env://', rank=rank)
 
