@@ -64,7 +64,7 @@ class UserEncoder(nn.Module):
 
 
 class Model(torch.nn.Module):
-    def __init__(self, args, embedding_matrix, **kwargs):
+    def __init__(self, args, embedding_matrix,num_categories, num_subcategories):
         super(Model, self).__init__()
         self.args = args
         pretrained_word_embedding = torch.from_numpy(embedding_matrix).float()

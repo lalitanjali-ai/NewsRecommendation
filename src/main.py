@@ -26,7 +26,7 @@ def train(rank, args):
     else:
         is_distributed = True
 
-    if is_distributed:
+    if is_distribnum_words_titleuted:
         utils.setuplogger()
         dist.init_process_group('nccl', world_size=args.nGPU, init_method='env://', rank=rank)
 
@@ -37,7 +37,14 @@ def train(rank, args):
 
     news_title, news_category, news_subcategory = get_doc_input(
         news, news_index, category_dict, subcategory_dict, word_dict, args)
-    news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+
+    if args.use_category or args.use_subcategory:
+        news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+
+        if args.use_category:
+            args.num_words_title = args.num_words_title+1
+        if args.use_subcategory:
+            args.num_words_title = args.num_words_title+1
 
     if rank == 0:
         logging.info('Initializing word embedding matrix...')
