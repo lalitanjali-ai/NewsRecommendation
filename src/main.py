@@ -38,8 +38,10 @@ def train(rank, args):
     news_title, news_category, news_subcategory = get_doc_input(
         news, news_index, category_dict, subcategory_dict, word_dict, args)
 
-    if args.use_category or args.use_subcategory:
+    if args.use_category and args.use_subcategory:
         news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+    else:
+        news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
 
         if args.use_category:
             args.num_words_title = args.num_words_title+1
