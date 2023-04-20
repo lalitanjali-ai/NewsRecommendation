@@ -40,7 +40,7 @@ def parse_args():
     parser.add_argument("--num_words_title", type=int, default=20)
     parser.add_argument("--num_words_abstract", type=int, default=50)
     parser.add_argument("--user_log_length", type=int, default=50)
-    parser.add_argument("--word_embedding_type", type=int, default='glove')
+    parser.add_argument("--word_embedding_type", type=str, default='glove')
     parser.add_argument("--word_embedding_dim", type=int, default=300)
     parser.add_argument("--glove_embedding_path", type=str, default='../data/glove.840B.300d.txt')
     parser.add_argument("--freeze_embedding", type=utils.str2bool, default=False)

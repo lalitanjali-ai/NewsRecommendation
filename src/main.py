@@ -56,8 +56,7 @@ def train(rank, args):
 
     if args.word_embedding_type=='bert':
         args.word_embedding_dim == 768
-
-        embedding_matrix_bert, have_word = utils.load_matrix_bert(word_dict, args.word_embedding_dim)
+        embedding_matrix, have_word = utils.load_matrix_bert(word_dict, args.word_embedding_dim)
     else:
         embedding_matrix, have_word = utils.load_matrix(args.glove_embedding_path,
                                                     word_dict,
@@ -84,10 +83,10 @@ def train(rank, args):
     if is_distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
 
-    # if rank == 0:
-    #     print(model)
-    #     for name, param in model.named_parameters():
-    #         print(name, param.requires_grad)
+    if rank == 0:
+        print(model)
+        for name, param in model.named_parameters():
+            print(name, param.requires_grad)
 
     data_file_path = os.path.join(args.train_data_dir, f'behaviors_np{args.npratio}_{rank}.tsv')
 
