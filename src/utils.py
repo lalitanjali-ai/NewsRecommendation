@@ -1,9 +1,10 @@
 import logging
 import os
 import sys
-import torch
 import numpy as np
 import argparse
+import torch
+from transformers import BertTokenizer, BertModel
 
 
 def str2bool(v):
@@ -43,7 +44,7 @@ def acc(y_true, y_hat):
 def dcg_score(y_true, y_score, k=10):
     order = np.argsort(y_score)[::-1]
     y_true = np.take(y_true, order[:k])
-    gains = 2**y_true - 1
+    gains = 2 ** y_true - 1
     discounts = np.log2(np.arange(len(y_true)) + 2)
     return np.sum(gains / discounts)
 
@@ -86,3 +87,29 @@ def get_checkpoint(directory, ckpt_name):
         return ckpt_path
     else:
         return None
+
+
+# function to create embeddings with BERT
+def create_bert_embeddings(text, tokenizer, model):
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    embeddings = outputs.last_hidden_state[:, 0, :].numpy()
+    return embeddings
+
+
+def load_matrix_bert(word_dict, word_embedding_dim):
+    embedding_matrix = np.zeros(shape=(len(word_dict) + 1, word_embedding_dim))
+    have_word = []
+
+    # loading BERT model
+    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+    model = BertModel.from_pretrained("bert-base-uncased")
+
+    for word in word_dict.keys():
+        index = word_dict[word]
+        embedding = create_bert_embeddings(word, tokenizer, model)
+        embedding_matrix[index] = np.array(embedding)
+        have_word.append(word)
+
+    return embedding_matrix, have_word
