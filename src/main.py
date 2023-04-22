@@ -18,7 +18,7 @@ from preprocess import read_news, get_doc_input
 from prepare_data import prepare_training_data, prepare_testing_data
 from dataset import DatasetTrain, DatasetTest, NewsDataset
 import pandas as pd
-
+import numpy as np
 import nltk
 
 nltk.download('punkt')
@@ -45,11 +45,6 @@ def train(rank, args):
 
     news_title, news_category, news_subcategory, news_abstract = get_doc_input(
         news, news_index, category_dict, subcategory_dict, word_dict, abs_word_dict, args)
-
-    # if args.use_category and args.use_subcategory:
-    #     news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
-    # else:
-    #     news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
 
     if args.use_category or args.use_subcategory:
         news_combined = np.concatenate(
