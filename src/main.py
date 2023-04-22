@@ -18,6 +18,8 @@ from preprocess import read_news, get_doc_input
 from prepare_data import prepare_training_data, prepare_testing_data
 from dataset import DatasetTrain, DatasetTest, NewsDataset
 
+import nltk
+nltk.download('punkt')
 
 def train(rank, args):
     if rank is None:
@@ -26,7 +28,7 @@ def train(rank, args):
     else:
         is_distributed = True
 
-    if is_distribnum_words_titleuted:
+    if is_distributed:
         utils.setuplogger()
         dist.init_process_group('nccl', world_size=args.nGPU, init_method='env://', rank=rank)
 
@@ -38,8 +40,10 @@ def train(rank, args):
     news_title, news_category, news_subcategory = get_doc_input(
         news, news_index, category_dict, subcategory_dict, word_dict, args)
 
-    if args.use_category or args.use_subcategory:
+    if args.use_category and args.use_subcategory:
         news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+    else:
+        news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
 
         if args.use_category:
             args.num_words_title = args.num_words_title+1
@@ -49,7 +53,12 @@ def train(rank, args):
     if rank == 0:
         logging.info('Initializing word embedding matrix...')
 
-    embedding_matrix, have_word = utils.load_matrix(args.glove_embedding_path,
+
+    if args.word_embedding_type=='bert':
+        args.word_embedding_dim == 768
+        embedding_matrix, have_word = utils.load_matrix_bert(word_dict, args.word_embedding_dim)
+    else:
+        embedding_matrix, have_word = utils.load_matrix(args.glove_embedding_path,
                                                     word_dict,
                                                     args.word_embedding_dim)
     if rank == 0:
@@ -74,10 +83,10 @@ def train(rank, args):
     if is_distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
 
-    # if rank == 0:
-    #     print(model)
-    #     for name, param in model.named_parameters():
-    #         print(name, param.requires_grad)
+    if rank == 0:
+        print(model)
+        for name, param in model.named_parameters():
+            print(name, param.requires_grad)
 
     data_file_path = os.path.join(args.train_data_dir, f'behaviors_np{args.npratio}_{rank}.tsv')
 
@@ -281,6 +290,9 @@ if __name__ == "__main__":
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '8888'
     Path(args.model_dir).mkdir(parents=True, exist_ok=True)
+
+    if args.word_embedding_type=='bert':
+        args.word_embedding_dim == 768
 
     if 'train' in args.mode:
         if args.prepare:
