@@ -17,9 +17,12 @@ from parameters import parse_args
 from preprocess import read_news, get_doc_input
 from prepare_data import prepare_training_data, prepare_testing_data
 from dataset import DatasetTrain, DatasetTest, NewsDataset
+import pandas as pd
 
 import nltk
+
 nltk.download('punkt')
+
 
 def train(rank, args):
     if rank is None:
@@ -34,33 +37,44 @@ def train(rank, args):
 
     torch.cuda.set_device(rank)
 
-    news, news_index, category_dict, subcategory_dict, word_dict = read_news(
-        os.path.join(args.train_data_dir, 'news.tsv'), args, mode='train')
+    if args.use_topics:
+        bert_topics_train = pd.read_csv("bert_topics/train_small_bert_topics.tsv", sep='\t')
 
-    news_title, news_category, news_subcategory = get_doc_input(
-        news, news_index, category_dict, subcategory_dict, word_dict, args)
+    news, news_index, category_dict, subcategory_dict, word_dict, abs_word_dict = read_news(
+        os.path.join(args.train_data_dir, 'news.tsv'), args, mode='train', bert_topics_train=bert_topics_train)
 
-    if args.use_category and args.use_subcategory:
-        news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+    news_title, news_category, news_subcategory, news_abstract = get_doc_input(
+        news, news_index, category_dict, subcategory_dict, word_dict, abs_word_dict, args)
+
+    # if args.use_category and args.use_subcategory:
+    #     news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+    # else:
+    #     news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
+
+    if args.use_category or args.use_subcategory:
+        news_combined = np.concatenate(
+            [x for x in [news_title, news_category, news_subcategory, news_abstract] if x is not None], axis=-1)
+    elif args.use_abstract:
+        news_combined = np.concatenate([news_title, news_abstract], axis=-1)
+        args.num_words_title = args.num_words_title + args.num_words_abstract
     else:
         news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
 
         if args.use_category:
-            args.num_words_title = args.num_words_title+1
+            args.num_words_title = args.num_words_title + 1
         if args.use_subcategory:
-            args.num_words_title = args.num_words_title+1
+            args.num_words_title = args.num_words_title + 1
 
     if rank == 0:
         logging.info('Initializing word embedding matrix...')
 
-
-    if args.word_embedding_type=='bert':
+    if args.word_embedding_type == 'bert':
         args.word_embedding_dim == 768
         embedding_matrix, have_word = utils.load_matrix_bert(word_dict, args.word_embedding_dim)
     else:
         embedding_matrix, have_word = utils.load_matrix(args.glove_embedding_path,
-                                                    word_dict,
-                                                    args.word_embedding_dim)
+                                                        word_dict,
+                                                        args.word_embedding_dim)
     if rank == 0:
         logging.info(f'Word dict length: {len(word_dict)}')
         logging.info(f'Have words: {len(have_word)}')
@@ -118,7 +132,7 @@ def train(rank, args):
                 )
 
             if rank == 0 and cnt != 0 and cnt % args.save_steps == 0:
-                ckpt_path = os.path.join(args.model_dir, f'epoch-{ep+1}-{cnt}.pt')
+                ckpt_path = os.path.join(args.model_dir, f'epoch-{ep + 1}-{cnt}.pt')
                 torch.save(
                     {
                         'model_state_dict':
@@ -133,7 +147,7 @@ def train(rank, args):
         logging.info('Training finish.')
 
         if rank == 0:
-            ckpt_path = os.path.join(args.model_dir, f'epoch-{ep+1}.pt')
+            ckpt_path = os.path.join(args.model_dir, f'epoch-{ep + 1}.pt')
             torch.save(
                 {
                     'model_state_dict':
@@ -208,7 +222,8 @@ def test(rank, args):
             i = random.randrange(1, len(news_scoring))
             j = random.randrange(1, len(news_scoring))
             if i != j:
-                doc_sim += np.dot(news_scoring[i], news_scoring[j]) / (np.linalg.norm(news_scoring[i]) * np.linalg.norm(news_scoring[j]))
+                doc_sim += np.dot(news_scoring[i], news_scoring[j]) / (
+                            np.linalg.norm(news_scoring[i]) * np.linalg.norm(news_scoring[j]))
         logging.info(f'News doc-sim: {doc_sim / 1000000}')
 
     data_file_path = os.path.join(args.test_data_dir, f'behaviors_{rank}.tsv')
@@ -291,7 +306,7 @@ if __name__ == "__main__":
     os.environ['MASTER_PORT'] = '8888'
     Path(args.model_dir).mkdir(parents=True, exist_ok=True)
 
-    if args.word_embedding_type=='bert':
+    if args.word_embedding_type == 'bert':
         args.word_embedding_dim == 768
 
     if 'train' in args.mode:
@@ -303,12 +318,14 @@ if __name__ == "__main__":
             for i in range(args.nGPU):
                 data_file_path = os.path.join(args.train_data_dir, f'behaviors_np{args.npratio}_{i}.tsv')
                 if not os.path.exists(data_file_path):
-                    logging.error(f'Splited training data {data_file_path} for GPU {i} does not exist. Please set the parameter --prepare as True and rerun the code.')
+                    logging.error(
+                        f'Splited training data {data_file_path} for GPU {i} does not exist. Please set the parameter --prepare as True and rerun the code.')
                     exit()
                 result = subprocess.getoutput(f'wc -l {data_file_path}')
                 total_sample_num += int(result.split(' ')[0])
             logging.info('Skip training data preparation.')
-        logging.info(f'{total_sample_num} training samples, {total_sample_num // args.batch_size // args.nGPU} batches in total.')
+        logging.info(
+            f'{total_sample_num} training samples, {total_sample_num // args.batch_size // args.nGPU} batches in total.')
 
         if args.nGPU == 1:
             train(None, args)
@@ -324,7 +341,8 @@ if __name__ == "__main__":
             for i in range(args.nGPU):
                 data_file_path = os.path.join(args.test_data_dir, f'behaviors_{i}.tsv')
                 if not os.path.exists(data_file_path):
-                    logging.error(f'Splited testing data {data_file_path} for GPU {i} does not exist. Please set the parameter --prepare as True and rerun the code.')
+                    logging.error(
+                        f'Splited testing data {data_file_path} for GPU {i} does not exist. Please set the parameter --prepare as True and rerun the code.')
                     exit()
                 result = subprocess.getoutput(f'wc -l {data_file_path}')
                 total_sample_num += int(result.split(' ')[0])
