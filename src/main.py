@@ -11,13 +11,15 @@ import random
 from torch.utils.data import DataLoader
 import importlib
 import subprocess
+from dotenv import dotenv_values
 
 import utils
 from parameters import parse_args
 from preprocess import read_news, get_doc_input
 from prepare_data import prepare_training_data, prepare_testing_data
 from dataset import DatasetTrain, DatasetTest, NewsDataset
-
+import nltk
+nltk.download('punkt')
 
 def train(rank, args):
     if rank is None:
@@ -26,11 +28,12 @@ def train(rank, args):
     else:
         is_distributed = True
 
-    if is_distribnum_words_titleuted:
-        utils.setuplogger()
-        dist.init_process_group('nccl', world_size=args.nGPU, init_method='env://', rank=rank)
+    # if is_distribnum_words_titleuted:
+    #     utils.setuplogger()
+    #     dist.init_process_group('nccl', world_size=args.nGPU, init_method='env://', rank=rank)
 
-    torch.cuda.set_device(rank)
+    if args.enable_gpu:
+        torch.cuda.set_device(rank)
 
     news, news_index, category_dict, subcategory_dict, word_dict = read_news(
         os.path.join(args.train_data_dir, 'news.tsv'), args, mode='train')
@@ -38,8 +41,12 @@ def train(rank, args):
     news_title, news_category, news_subcategory = get_doc_input(
         news, news_index, category_dict, subcategory_dict, word_dict, args)
 
+
+    news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
     if args.use_category or args.use_subcategory:
         news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+
+
 
         if args.use_category:
             args.num_words_title = args.num_words_title+1
@@ -148,7 +155,8 @@ def test(rank, args):
         utils.setuplogger()
         dist.init_process_group('nccl', world_size=args.nGPU, init_method='env://', rank=rank)
 
-    torch.cuda.set_device(rank)
+    if args.enable_gpu:
+        torch.cuda.set_device(rank)
 
     if args.load_ckpt_name is not None:
         ckpt_path = utils.get_checkpoint(args.model_dir, args.load_ckpt_name)
@@ -185,7 +193,8 @@ def test(rank, args):
     news_scoring = []
     with torch.no_grad():
         for input_ids in tqdm(news_dataloader):
-            input_ids = input_ids.cuda(rank)
+            if args.enable_gpu:
+                input_ids = input_ids.cuda(rank)
             news_vec = model.news_encoder(input_ids)
             news_vec = news_vec.to(torch.device("cpu")).detach().numpy()
             news_scoring.extend(news_vec)
@@ -281,6 +290,15 @@ if __name__ == "__main__":
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '8888'
     Path(args.model_dir).mkdir(parents=True, exist_ok=True)
+    args.model_dir = '../model'
+    args.model = 'NRMS'
+    args.mode = 'train'
+    args.load_ckpt_name = 'epoch-1.pt'
+
+    tarin_config = dotenv_values("../.env")
+    if tarin_config.get('LOCAL'):
+        args.enable_gpu = False
+        args.nGPU = 1
 
     if 'train' in args.mode:
         if args.prepare:

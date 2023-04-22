@@ -76,20 +76,30 @@ class Model(torch.nn.Module):
         self.user_encoder = UserEncoder(args)
         self.loss_fn = nn.CrossEntropyLoss()
 
-    def forward(self, history, history_mask, candidate, label):
+    def forward(self, history, candidate, label, infer=True):
         '''
             history: batch_size, history_length, num_word_title
             history_mask: batch_size, history_length
             candidate: batch_size, 1+K, num_word_title
             label: batch_size, 1+K
         '''
+
+        history_mask = (torch.count_nonzero(history, dim=-1) > 0).float()
+        print(history.shape, history_mask.shape, candidate.shape, label.shape )
+
         candidate_news = candidate.reshape(-1, self.args.num_words_title)
         candidate_news_vecs = self.news_encoder(candidate_news).reshape(-1, 1 + self.args.npratio, self.args.news_dim)
+        print('candidate news shape is: ', candidate_news_vecs.shape)
 
         history_news = history.reshape(-1, self.args.num_words_title)
         history_news_vecs = self.news_encoder(history_news).reshape(-1, self.args.user_log_length, self.args.news_dim)
 
         user_vec = self.user_encoder(history_news_vecs, history_mask)
-        score = torch.bmm(candidate_news_vecs, user_vec.unsqueeze(dim=-1)).squeeze(dim=-1)
+        user_vec = user_vec.unsqueeze(dim=-1)
+        print('user_vec shape is: ', user_vec.shape)
+        score = torch.bmm(candidate_news_vecs, user_vec).squeeze(dim=-1)
+
+        if infer:
+            return F.softmax(score, dim=-1)
         loss = self.loss_fn(score, label)
         return loss, score
