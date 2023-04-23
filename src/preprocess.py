@@ -6,6 +6,7 @@ import numpy as np
 from nltk.tokenize import word_tokenize
 import nltk
 import re
+import string
 
 nltk.download('stopwords')
 # Define a list of stopwords
