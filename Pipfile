@@ -22,6 +22,7 @@ torchtext = "==0.6.0"
 spacy = "*"
 blis = "*"
 shap = "*"
+transformers = "*"
 
 [dev-packages]
 
