@@ -15,6 +15,7 @@ from dataset import DatasetTest, NewsDataset
 from parameters import parse_args
 from prepare_data import prepare_training_data
 from preprocess import read_news, get_doc_input
+from scipy.special import softmax
 
 
 class ResultPredist:
@@ -56,14 +57,16 @@ class ResultPredist:
         ]
 
         result_dict = {
-            "cand_doc": cand_doc,
-            "cand_label": cand_doc_label,
-            "hostory": article_hostory,
+            "cand_doc": cand_doc,  # candidate articles
+            "cand_label": cand_doc_label,  # candidate articles's click ground truth
+            "hostory": article_hostory,  # user history click
             "auc": self.results["auc"][ix],
             "mrr": self.results["mrr"][ix],
             "ndcg5": self.results["ndcg5"][ix],
             "ndcg10": self.results["ndcg10"][ix],
-            "score": self.results["scores"][ix],
+            "score": softmax(
+                self.results["scores"][ix]
+            ),  # probability of click on each candidate
         }
 
         return result_dict
