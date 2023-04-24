@@ -18,3 +18,4 @@ transformers
 sentence_transformers
 bertopic
 streamlit
+pyngrok
