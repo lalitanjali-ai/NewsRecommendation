@@ -20,7 +20,20 @@ from dataset import DatasetTrain, DatasetTest, NewsDataset
 import pandas as pd
 import numpy as np
 import nltk
+import pandas as pd
+import nltk
+import urllib
+import zipfile
+import os
+import string
+import re
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from tqdm import tqdm
 
+nltk.download('stopwords')
+stop_words = set(stopwords.words('english'))
+nltk.download('averaged_perceptron_tagger')
 nltk.download('punkt')
 
 
@@ -49,11 +62,11 @@ def train(rank, args):
     if args.use_category or args.use_subcategory:
         news_combined = np.concatenate(
             [x for x in [news_title, news_category, news_subcategory, news_abstract] if x is not None], axis=-1)
-    elif args.use_abstract:
-        news_combined = np.concatenate([news_title, news_abstract], axis=-1)
-        args.num_words_title = args.num_words_title + args.num_words_abstract
     else:
         news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
+
+    if args.word_embedding_type == 'bert':
+        args.word_embedding_dim == 768
 
         if args.use_category:
             args.num_words_title = args.num_words_title + 1
@@ -106,14 +119,17 @@ def train(rank, args):
     for ep in range(args.start_epoch, args.epochs):
         loss = 0.0
         accuary = 0.0
-        for cnt, (log_ids, log_mask, input_ids, targets) in enumerate(dataloader):
+
+        for cnt, (user_titles, user_abstracts, log_mask, news_titles, news_abstracts, targets) in enumerate(dataloader):
             if args.enable_gpu:
-                log_ids = log_ids.cuda(rank, non_blocking=True)
+                user_titles = user_titles.cuda(rank, non_blocking=True)
+                user_abstracts = user_abstracts.cuda(rank, non_blocking=True)
                 log_mask = log_mask.cuda(rank, non_blocking=True)
-                input_ids = input_ids.cuda(rank, non_blocking=True)
+                news_titles = news_titles.cuda(rank, non_blocking=True)
+                news_abstracts = news_abstracts.cuda(rank, non_blocking=True)
                 targets = targets.cuda(rank, non_blocking=True)
 
-            bz_loss, y_hat = model(log_ids, log_mask, input_ids, targets)
+            bz_loss, y_hat = model(user_titles, user_abstracts, log_mask, news_titles, news_abstracts, targets)
             loss += bz_loss.data.float()
             accuary += utils.acc(targets, y_hat)
             optimizer.zero_grad()

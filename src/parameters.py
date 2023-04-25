@@ -33,7 +33,7 @@ def parse_args():
     parser.add_argument("--filter_num", type=int, default=3)
     parser.add_argument("--log_steps", type=int, default=100)
 
-    parser.add_argument("--model", type=str, default=None, choices=['NAML', 'NRMS'])
+    parser.add_argument("--model", type=str, default=None, choices=['NAML', 'NRMS', 'NRMS_abstract'])
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--lr", type=float, default=0.0001)
 
@@ -57,7 +57,7 @@ def parse_args():
     parser.add_argument("--use_subcategory", type=utils.str2bool, default=False)
     parser.add_argument("--category_emb_dim", type=int, default=100)
     parser.add_argument("--use_topics", type=int, default=True)
-    parser.add_argument("--use_abstract", type=int, default=False)
+    parser.add_argument("--concat_abstract_to_title", type=int, default=False)
 
 
     args = parser.parse_args()
