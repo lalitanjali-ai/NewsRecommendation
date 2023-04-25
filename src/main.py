@@ -61,17 +61,18 @@ def train(rank, args):
 
     if args.use_category or args.use_subcategory:
         news_combined = np.concatenate(
-            [x for x in [news_title, news_category, news_subcategory, news_abstract] if x is not None], axis=-1)
+            [x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+    elif args.model == 'NRMS_abstract':
+        news_combined = np.concatenate([x for x in [news_title, news_abstract] if x is not None], axis=-1)
     else:
         news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
 
     if args.word_embedding_type == 'bert':
         args.word_embedding_dim == 768
-
-        if args.use_category:
-            args.num_words_title = args.num_words_title + 1
-        if args.use_subcategory:
-            args.num_words_title = args.num_words_title + 1
+    if args.use_category:
+        args.num_words_title = args.num_words_title + 1
+    if args.use_subcategory:
+        args.num_words_title = args.num_words_title + 1
 
     if rank == 0:
         logging.info('Initializing word embedding matrix...')
