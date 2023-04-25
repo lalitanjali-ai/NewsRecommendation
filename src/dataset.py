@@ -75,7 +75,7 @@ import random
 
 class DatasetTrain(IterableDataset):
     def __init__(self, filename, news_index, news_combined, args):
-        super(DatasetTrain_new, self).__init__()
+        super(DatasetTrain, self).__init__()
         self.filename = filename
         self.news_index = news_index
         self.news_combined = news_combined
