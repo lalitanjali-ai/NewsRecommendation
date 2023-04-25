@@ -89,9 +89,9 @@ class UserEncoder(nn.Module):
         return user_vec
 
 
-class NRMS_abstract(torch.nn.Module):
+class Model(torch.nn.Module):
     def __init__(self, args, embedding_matrix, num_categories, num_subcategories):
-        super(NRMS_abstract, self).__init__()
+        super(Model, self).__init__()
         self.args = args
         if args.enable_gpu:
             embedding_matrix = torch.from_numpy(embedding_matrix).float().cuda()

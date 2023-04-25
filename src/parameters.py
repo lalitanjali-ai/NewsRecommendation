@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--lr", type=float, default=0.0001)
 
-    parser.add_argument("--num_words_title", type=int, default=20)
+    parser.add_argument("--num_words_title", type=int, default=50)
     parser.add_argument("--num_words_abstract", type=int, default=50)
     parser.add_argument("--user_log_length", type=int, default=50)
     parser.add_argument("--word_embedding_type", type=str, default='glove')
