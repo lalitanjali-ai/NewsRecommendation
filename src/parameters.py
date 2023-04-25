@@ -57,7 +57,6 @@ def parse_args():
     parser.add_argument("--use_subcategory", type=utils.str2bool, default=False)
     parser.add_argument("--category_emb_dim", type=int, default=100)
     parser.add_argument("--use_topics", type=int, default=True)
-    parser.add_argument("--concat_abstract_to_title", type=int, default=False)
 
 
     args = parser.parse_args()

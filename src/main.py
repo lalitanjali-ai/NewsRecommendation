@@ -1,35 +1,26 @@
-from threading import local
-import numpy as np
-import torch
-import logging
-from tqdm.auto import tqdm
-import torch.optim as optim
-import torch.distributed as dist
-import os
-from pathlib import Path
-import random
-from torch.utils.data import DataLoader
 import importlib
+import logging
+import os
+import random
 import subprocess
+from pathlib import Path
+
+import nltk
+import numpy as np
+import pandas as pd
+import torch
+import torch.distributed as dist
+import torch.optim as optim
+from nltk.corpus import stopwords
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from tqdm.auto import tqdm
 
 import utils
-from parameters import parse_args
-from preprocess import read_news, get_doc_input
-from prepare_data import prepare_training_data, prepare_testing_data
 from dataset import DatasetTrain, DatasetTest, NewsDataset
-import pandas as pd
-import numpy as np
-import nltk
-import pandas as pd
-import nltk
-import urllib
-import zipfile
-import os
-import string
-import re
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-from tqdm import tqdm
+from parameters import parse_args
+from prepare_data import prepare_training_data, prepare_testing_data
+from preprocess import read_news, get_doc_input
 
 nltk.download('stopwords')
 stop_words = set(stopwords.words('english'))
@@ -62,17 +53,18 @@ def train(rank, args):
     if args.use_category or args.use_subcategory:
         news_combined = np.concatenate(
             [x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
-    elif args.model == 'NRMS_abstract':
-        news_combined = np.concatenate([x for x in [news_title, news_abstract] if x is not None], axis=-1)
+        if args.use_category:
+            args.num_words_title = args.num_words_title + 1
+        if args.use_subcategory:
+            args.num_words_title = args.num_words_title + 1
+    elif args.model=='NRMS_abstract':
+        news_combined = np.concatenate([x for x in [news_title,news_abstract] if x is not None], axis=-1)
     else:
         news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
 
     if args.word_embedding_type == 'bert':
         args.word_embedding_dim == 768
-    if args.use_category:
-        args.num_words_title = args.num_words_title + 1
-    if args.use_subcategory:
-        args.num_words_title = args.num_words_title + 1
+
 
     if rank == 0:
         logging.info('Initializing word embedding matrix...')
@@ -152,7 +144,9 @@ def train(rank, args):
                             if is_distributed else model.state_dict(),
                         'category_dict': category_dict,
                         'word_dict': word_dict,
-                        'subcategory_dict': subcategory_dict
+                        'subcategory_dict': subcategory_dict,
+                        'abs_word_dict':abs_word_dict
+
                     }, ckpt_path)
                 logging.info(f"Model saved to {ckpt_path}.")
 
@@ -168,6 +162,8 @@ def train(rank, args):
                     'category_dict': category_dict,
                     'subcategory_dict': subcategory_dict,
                     'word_dict': word_dict,
+                    'abs_word_dict':abs_word_dict
+
                 }, ckpt_path)
             logging.info(f"Model saved to {ckpt_path}.")
 
@@ -194,6 +190,7 @@ def test(rank, args):
     subcategory_dict = checkpoint['subcategory_dict']
     category_dict = checkpoint['category_dict']
     word_dict = checkpoint['word_dict']
+    abs_word_dict = checkpoint['abs_word_dict']
 
     dummy_embedding_matrix = np.zeros((len(word_dict) + 1, args.word_embedding_dim))
     module = importlib.import_module(f'model.{args.model}')
@@ -207,12 +204,37 @@ def test(rank, args):
     model.eval()
     torch.set_grad_enabled(False)
 
-    news, news_index = read_news(os.path.join(args.test_data_dir, 'news.tsv'), args, mode='test')
-    news_title, news_category, news_subcategory = get_doc_input(
-        news, news_index, category_dict, subcategory_dict, word_dict, args)
-    news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+    if args.use_topics:
+            bert_topics_train = pd.read_csv("bert_topics/train_small_bert_topics.tsv", sep='\t')
+
+    news, news_index = read_news(
+        os.path.join(args.train_data_dir, 'news.tsv'), args, mode='test', bert_topics_train=bert_topics_train)
+
+    news_title, news_category, news_subcategory, news_abstract = get_doc_input(
+        news, news_index, category_dict, subcategory_dict, word_dict, abs_word_dict, args)
+
+    if args.use_category or args.use_subcategory:
+        news_combined = np.concatenate(
+            [x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+        if args.use_category:
+            args.num_words_title = args.num_words_title + 1
+        if args.use_subcategory:
+            args.num_words_title = args.num_words_title + 1
+    elif args.model=='NRMS_abstract':
+        news_combined = np.concatenate([x for x in [news_title,news_abstract] if x is not None], axis=-1)
+    else:
+        news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
+
+    if args.word_embedding_type == 'bert':
+        args.word_embedding_dim == 768
+        embedding_matrix, have_word = utils.load_matrix_bert(word_dict, args.word_embedding_dim)
+    else:
+        embedding_matrix, have_word = utils.load_matrix(args.glove_embedding_path,
+                                                        word_dict,
+                                                        args.word_embedding_dim)
 
     news_dataset = NewsDataset(news_combined)
+
     news_dataloader = DataLoader(news_dataset,
                                  batch_size=args.batch_size,
                                  num_workers=4)
