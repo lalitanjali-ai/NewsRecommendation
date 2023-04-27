@@ -21,6 +21,7 @@ from dataset import DatasetTrain, DatasetTest, NewsDataset
 from parameters import parse_args
 from prepare_data import prepare_training_data, prepare_testing_data
 from preprocess import read_news, get_doc_input
+from metrics import roc_auc_score, ndcg_score, mrr_score
 
 nltk.download('stopwords')
 stop_words = set(stopwords.words('english'))
@@ -106,7 +107,7 @@ def train(rank, args):
     data_file_path = os.path.join(args.train_data_dir, f'behaviors_np{args.npratio}_{rank}.tsv')
 
     dataset = DatasetTrain(data_file_path, news_index, news_combined, args)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size,drop_last=True)
 
     logging.info('Training...')
     for ep in range(args.start_epoch, args.epochs):
@@ -167,7 +168,6 @@ def train(rank, args):
                 }, ckpt_path)
             logging.info(f"Model saved to {ckpt_path}.")
 
-
 def test(rank, args):
     if rank is None:
         is_distributed = False
@@ -187,15 +187,18 @@ def test(rank, args):
     assert ckpt_path is not None, 'No checkpoint found.'
     checkpoint = torch.load(ckpt_path, map_location='cpu')
 
-    subcategory_dict = checkpoint['subcategory_dict']
-    category_dict = checkpoint['category_dict']
-    word_dict = checkpoint['word_dict']
+
+    category_dict = checkpoint["category_dict"]
+    subcategory_dict = checkpoint["subcategory_dict"]
+    word_dict = checkpoint["word_dict"]
     abs_word_dict = checkpoint['abs_word_dict']
 
     dummy_embedding_matrix = np.zeros((len(word_dict) + 1, args.word_embedding_dim))
-    module = importlib.import_module(f'model.{args.model}')
-    model = module.Model(args, dummy_embedding_matrix, len(category_dict), len(subcategory_dict))
-    model.load_state_dict(checkpoint['model_state_dict'])
+    module = importlib.import_module(f"model.{args.model}")
+    model = module.Model(
+        args, dummy_embedding_matrix, len(category_dict), len(subcategory_dict)
+    )
+    model.load_state_dict(checkpoint["model_state_dict"])
     logging.info(f"Model loaded from {ckpt_path}")
 
     if args.enable_gpu:
@@ -205,13 +208,14 @@ def test(rank, args):
     torch.set_grad_enabled(False)
 
     if args.use_topics:
-            bert_topics_train = pd.read_csv("bert_topics/train_small_bert_topics.tsv", sep='\t')
+            bert_topics_test = pd.read_csv("bert_topics/val_small_bert_topics.tsv", sep='\t')
 
     news, news_index = read_news(
-        os.path.join(args.train_data_dir, 'news.tsv'), args, mode='test', bert_topics_train=bert_topics_train)
+        os.path.join(args.test_data_dir, 'news.tsv'), args, mode='test', bert_topics_train=bert_topics_test)
 
     news_title, news_category, news_subcategory, news_abstract = get_doc_input(
         news, news_index, category_dict, subcategory_dict, word_dict, abs_word_dict, args)
+
 
     if args.use_category or args.use_subcategory:
         news_combined = np.concatenate(
@@ -225,109 +229,54 @@ def test(rank, args):
     else:
         news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
 
-    if args.word_embedding_type == 'bert':
-        args.word_embedding_dim == 768
-        embedding_matrix, have_word = utils.load_matrix_bert(word_dict, args.word_embedding_dim)
-    else:
-        embedding_matrix, have_word = utils.load_matrix(args.glove_embedding_path,
-                                                        word_dict,
-                                                        args.word_embedding_dim)
-
-    news_dataset = NewsDataset(news_combined)
-
-    news_dataloader = DataLoader(news_dataset,
-                                 batch_size=args.batch_size,
-                                 num_workers=4)
-
-    news_scoring = []
-    with torch.no_grad():
-        for input_ids in tqdm(news_dataloader):
-            input_ids = input_ids.cuda(rank)
-            news_vec = model.news_encoder(input_ids)
-            news_vec = news_vec.to(torch.device("cpu")).detach().numpy()
-            news_scoring.extend(news_vec)
-
-    news_scoring = np.array(news_scoring)
-    logging.info("news scoring num: {}".format(news_scoring.shape[0]))
-
-    if rank == 0:
-        doc_sim = 0
-        for _ in tqdm(range(1000000)):
-            i = random.randrange(1, len(news_scoring))
-            j = random.randrange(1, len(news_scoring))
-            if i != j:
-                doc_sim += np.dot(news_scoring[i], news_scoring[j]) / (
-                            np.linalg.norm(news_scoring[i]) * np.linalg.norm(news_scoring[j]))
-        logging.info(f'News doc-sim: {doc_sim / 1000000}')
-
-    data_file_path = os.path.join(args.test_data_dir, f'behaviors_{rank}.tsv')
 
     def collate_fn(tuple_list):
-        log_vecs = torch.FloatTensor([x[0] for x in tuple_list])
-        log_mask = torch.FloatTensor([x[1] for x in tuple_list])
-        news_vecs = [x[2] for x in tuple_list]
-        labels = [x[3] for x in tuple_list]
-        return (log_vecs, log_mask, news_vecs, labels)
+      user_titles = torch.FloatTensor([x[0] for x in tuple_list])
+      user_abstracts = torch.FloatTensor([x[1] for x in tuple_list])
+      log_mask = torch.FloatTensor([x[2] for x in tuple_list])
+      news_titles = torch.FloatTensor([x[3] for x in tuple_list])
+      news_abstracts = torch.FloatTensor([x[4] for x in tuple_list])
+      targets = torch.FloatTensor([x[5] for x in tuple_list])
 
-    dataset = DatasetTest(data_file_path, news_index, news_scoring, args)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=collate_fn)
+      return (user_titles, user_abstracts, log_mask, news_titles, news_abstracts, targets)
 
-    from metrics import roc_auc_score, ndcg_score, mrr_score
+    data_file_path = os.path.join(args.test_data_dir, f"behaviors_{rank}.tsv")
+
+    dataset = DatasetTest(data_file_path, news_index, news_combined, args)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size,collate_fn=collate_fn,drop_last=True)
 
     AUC = []
     MRR = []
     nDCG5 = []
     nDCG10 = []
 
-    def print_metrics(rank, cnt, x):
-        logging.info("[{}] {} samples: {}".format(rank, cnt, '\t'.join(["{:0.2f}".format(i * 100) for i in x])))
-
-    def get_mean(arr):
-        return [np.array(i).mean() for i in arr]
-
-    def get_sum(arr):
-        return [np.array(i).sum() for i in arr]
-
-    local_sample_num = 0
-
-    for cnt, (log_vecs, log_mask, news_vecs, labels) in enumerate(dataloader):
-        local_sample_num += log_vecs.shape[0]
-
+    for cnt, (user_titles, user_abstracts, log_mask, news_titles, news_abstracts, targets) in enumerate(dataloader):
         if args.enable_gpu:
-            log_vecs = log_vecs.cuda(rank, non_blocking=True)
+            user_titles = user_titles.cuda(rank, non_blocking=True)
+            user_abstracts = user_abstracts.cuda(rank, non_blocking=True)
             log_mask = log_mask.cuda(rank, non_blocking=True)
+            news_titles = news_titles.cuda(rank, non_blocking=True)
+            news_abstracts = news_abstracts.cuda(rank, non_blocking=True)
+            targets = targets.cuda(rank, non_blocking=True)
 
-        user_vecs = model.user_encoder(log_vecs, log_mask).to(torch.device("cpu")).detach().numpy()
+        bz_loss, y_hat = model(user_titles, user_abstracts, log_mask, news_titles, news_abstracts)
 
-        for user_vec, news_vec, label in zip(user_vecs, news_vecs, labels):
-            if label.mean() == 0 or label.mean() == 1:
-                continue
+        # Metric calculations
+        auc = roc_auc_score(targets.cpu().numpy(), y_hat.cpu().numpy())
+        mrr = mrr_score(targets.cpu().numpy(), y_hat.cpu().numpy())
+        ndcg5 = ndcg_score(targets.cpu().numpy(), y_hat.cpu().numpy(), k=5)
+        ndcg10 = ndcg_score(targets.cpu().numpy(), y_hat.cpu().numpy(), k=10)
 
-            score = np.dot(news_vec, user_vec)
+        AUC.append(auc)
+        MRR.append(mrr)
+        nDCG5.append(ndcg5)
+        nDCG10.append(ndcg10)
 
-            auc = roc_auc_score(label, score)
-            mrr = mrr_score(label, score)
-            ndcg5 = ndcg_score(label, score, k=5)
-            ndcg10 = ndcg_score(label, score, k=10)
-
-            AUC.append(auc)
-            MRR.append(mrr)
-            nDCG5.append(ndcg5)
-            nDCG10.append(ndcg10)
-
-        if cnt % args.log_steps == 0:
-            print_metrics(rank, local_sample_num, get_mean([AUC, MRR, nDCG5, nDCG10]))
-
-    logging.info('[{}] local_sample_num: {}'.format(rank, local_sample_num))
-    if is_distributed:
-        local_sample_num = torch.tensor(local_sample_num).cuda(rank)
-        dist.reduce(local_sample_num, dst=0, op=dist.ReduceOp.SUM)
-        local_metrics_sum = torch.FloatTensor(get_sum([AUC, MRR, nDCG5, nDCG10])).cuda(rank)
-        dist.reduce(local_metrics_sum, dst=0, op=dist.ReduceOp.SUM)
-        if rank == 0:
-            print_metrics('*', local_sample_num, local_metrics_sum / local_sample_num)
-    else:
-        print_metrics('*', local_sample_num, get_mean([AUC, MRR, nDCG5, nDCG10]))
+    # Log final results
+    logging.info(f"Mean AUC: {np.mean(AUC)}")
+    logging.info(f"Mean MRR: {np.mean(MRR)}")
+    logging.info(f"Mean nDCG@5: {np.mean(nDCG5)}")
+    logging.info(f"Mean nDCG@10: {np.mean(nDCG10)}")
 
 
 if __name__ == "__main__":
@@ -387,3 +336,4 @@ if __name__ == "__main__":
             test(None, args)
         else:
             torch.multiprocessing.spawn(test, nprocs=args.nGPU, args=(args,))
+
