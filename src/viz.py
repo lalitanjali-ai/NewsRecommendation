@@ -13,8 +13,10 @@ from tqdm import tqdm
 import utils as utils
 from dataset import DatasetTest, NewsDataset
 from parameters import parse_args
-from prepare_data import prepare_training_data
+from prepare_data import prepare_testing_data
 from preprocess import read_news, get_doc_input
+#import nltk
+#nltk.download('punkt')
 
 
 class ResultPredist:
@@ -144,8 +146,6 @@ def test(args):
 
     data_file_path = os.path.join(args.test_data_dir, f"behaviors_{rank}.tsv")
 
-    data_file_path = os.path.join(args.test_data_dir, f"behaviors_{rank}.tsv")
-
     def collate_fn(tuple_list):
         log_vecs = torch.FloatTensor([x[0] for x in tuple_list])
         log_mask = torch.FloatTensor([x[1] for x in tuple_list])
@@ -234,16 +234,14 @@ if __name__ == "__main__":
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "8888"
     Path(args.model_dir).mkdir(parents=True, exist_ok=True)
-    args.model_dir = "model"
+    args.model_dir = "src/model"
     args.model = "NRMS"
     args.mode = "test"
     args.enable_gpu = False
     args.load_ckpt_name = "epoch-1.pt"
     if args.prepare:
         logging.info("Preparing training data...")
-        total_sample_num = prepare_training_data(
-            args.train_data_dir, args.nGPU, args.npratio, args.seed
-        )
+        total_sample_num = prepare_testing_data(args.test_data_dir, args.nGPU)
 
     results = ResultPredist(args)
     results.get_result(73000)
