@@ -19,12 +19,12 @@ def parse_args():
     parser.add_argument(
         "--train_data_dir",
         type=str,
-        default="data/MINDsmall_train",
+        default="../data/MINDsmall_train",
     )
     parser.add_argument(
         "--test_data_dir",
         type=str,
-        default="data/MINDsmall_dev",
+        default="../data/MINDsmall_dev",
     )
     parser.add_argument("--model_dir", type=str, default='model')
     parser.add_argument("--batch_size", type=int, default=32)
@@ -42,7 +42,7 @@ def parse_args():
     parser.add_argument("--user_log_length", type=int, default=50)
     parser.add_argument("--word_embedding_type", type=str, default='glove')
     parser.add_argument("--word_embedding_dim", type=int, default=300)
-    parser.add_argument("--glove_embedding_path", type=str, default='data/glove.840B.300d.txt')
+    parser.add_argument("--glove_embedding_path", type=str, default='../data/glove.840B.300d.txt')
     parser.add_argument("--freeze_embedding", type=utils.str2bool, default=False)
     parser.add_argument("--news_dim", type=int, default=400)
     parser.add_argument("--news_query_vector_dim", type=int, default=200)

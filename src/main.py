@@ -295,10 +295,14 @@ if __name__ == "__main__":
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '8888'
     Path(args.model_dir).mkdir(parents=True, exist_ok=True)
-    args.model_dir = '../model'
-    args.model = 'NRMS'
-    args.mode = 'train'
-    args.load_ckpt_name = 'epoch-1.pt'
+    args.model_dir = '../model_naml'
+    args.model = 'NAML'
+    args.mode = 'train_test'
+    args.load_ckpt_name = None
+    args.use_category = True
+    args.use_subcategory = True
+    args.prepare = True
+
 
     tarin_config = dotenv_values("../.env")
     if tarin_config.get('LOCAL'):
