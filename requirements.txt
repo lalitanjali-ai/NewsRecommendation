@@ -17,3 +17,5 @@ wheel==0.36.2
 transformers
 sentence_transformers
 bertopic
+streamlit
+pyngrok
