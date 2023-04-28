@@ -117,7 +117,7 @@ class Model(torch.nn.Module):
         candidate_news_title = candidate_title.reshape(-1, self.args.num_words_title)
         candidate_news_abstract = candidate_abstract.reshape(-1, self.args.num_words_abstract)
         candidate_news_vecs = self.news_encoder(candidate_news_title, candidate_news_abstract).reshape(
-            self.args.batch_size, 1 + self.args.npratio, self.args.news_dim)
+            self.args.batch_size, -1, self.args.news_dim)
 
         history_news_title = history_title.reshape(-1, self.args.num_words_title)
         history_news_abstract = history_abstract.reshape(-1, self.args.num_words_abstract)

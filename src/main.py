@@ -22,6 +22,7 @@ from parameters import parse_args
 from prepare_data import prepare_training_data, prepare_testing_data
 from preprocess import read_news, get_doc_input
 from metrics import roc_auc_score, ndcg_score, mrr_score
+from torch.nn.utils.rnn import pad_sequence
 
 nltk.download('stopwords')
 stop_words = set(stopwords.words('english'))
@@ -58,14 +59,13 @@ def train(rank, args):
             args.num_words_title = args.num_words_title + 1
         if args.use_subcategory:
             args.num_words_title = args.num_words_title + 1
-    elif args.model=='NRMS_abstract':
-        news_combined = np.concatenate([x for x in [news_title,news_abstract] if x is not None], axis=-1)
+    elif args.model == 'NRMS_abstract':
+        news_combined = np.concatenate([x for x in [news_title, news_abstract] if x is not None], axis=-1)
     else:
         news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
 
     if args.word_embedding_type == 'bert':
         args.word_embedding_dim == 768
-
 
     if rank == 0:
         logging.info('Initializing word embedding matrix...')
@@ -107,7 +107,7 @@ def train(rank, args):
     data_file_path = os.path.join(args.train_data_dir, f'behaviors_np{args.npratio}_{rank}.tsv')
 
     dataset = DatasetTrain(data_file_path, news_index, news_combined, args)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size,drop_last=True)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, drop_last=True)
 
     logging.info('Training...')
     for ep in range(args.start_epoch, args.epochs):
@@ -146,7 +146,8 @@ def train(rank, args):
                         'category_dict': category_dict,
                         'word_dict': word_dict,
                         'subcategory_dict': subcategory_dict,
-                        'abs_word_dict':abs_word_dict
+                        'abs_word_dict': abs_word_dict,
+                        'embedding_matrix': embedding_matrix,
 
                     }, ckpt_path)
                 logging.info(f"Model saved to {ckpt_path}.")
@@ -163,10 +164,12 @@ def train(rank, args):
                     'category_dict': category_dict,
                     'subcategory_dict': subcategory_dict,
                     'word_dict': word_dict,
-                    'abs_word_dict':abs_word_dict
+                    'abs_word_dict': abs_word_dict,
+                    'embedding_matrix': embedding_matrix,
 
                 }, ckpt_path)
             logging.info(f"Model saved to {ckpt_path}.")
+
 
 def test(rank, args):
     if rank is None:
@@ -181,41 +184,14 @@ def test(rank, args):
 
     torch.cuda.set_device(rank)
 
-    if args.load_ckpt_name is not None:
-        ckpt_path = utils.get_checkpoint(args.model_dir, args.load_ckpt_name)
-
-    assert ckpt_path is not None, 'No checkpoint found.'
-    checkpoint = torch.load(ckpt_path, map_location='cpu')
-
-
-    category_dict = checkpoint["category_dict"]
-    subcategory_dict = checkpoint["subcategory_dict"]
-    word_dict = checkpoint["word_dict"]
-    abs_word_dict = checkpoint['abs_word_dict']
-
-    dummy_embedding_matrix = np.zeros((len(word_dict) + 1, args.word_embedding_dim))
-    module = importlib.import_module(f"model.{args.model}")
-    model = module.Model(
-        args, dummy_embedding_matrix, len(category_dict), len(subcategory_dict)
-    )
-    model.load_state_dict(checkpoint["model_state_dict"])
-    logging.info(f"Model loaded from {ckpt_path}")
-
-    if args.enable_gpu:
-        model.cuda(rank)
-
-    model.eval()
-    torch.set_grad_enabled(False)
-
     if args.use_topics:
-            bert_topics_test = pd.read_csv("bert_topics/val_small_bert_topics.tsv", sep='\t')
+        bert_topics_test = pd.read_csv("bert_topics/val_small_bert_topics.tsv", sep='\t')
 
-    news, news_index = read_news(
+    news, news_index, category_dict, subcategory_dict, word_dict, abs_word_dict = read_news(
         os.path.join(args.test_data_dir, 'news.tsv'), args, mode='test', bert_topics_train=bert_topics_test)
 
     news_title, news_category, news_subcategory, news_abstract = get_doc_input(
         news, news_index, category_dict, subcategory_dict, word_dict, abs_word_dict, args)
-
 
     if args.use_category or args.use_subcategory:
         news_combined = np.concatenate(
@@ -224,42 +200,80 @@ def test(rank, args):
             args.num_words_title = args.num_words_title + 1
         if args.use_subcategory:
             args.num_words_title = args.num_words_title + 1
-    elif args.model=='NRMS_abstract':
-        news_combined = np.concatenate([x for x in [news_title,news_abstract] if x is not None], axis=-1)
+    elif args.model == 'NRMS_abstract':
+        news_combined = np.concatenate([x for x in [news_title, news_abstract] if x is not None], axis=-1)
     else:
         news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
 
+    # Load model from checkpoint
+    ckpt_path = utils.get_checkpoint(args.model_dir, args.load_ckpt_name)
+    checkpoint = torch.load(ckpt_path, map_location='cpu')
 
-    def collate_fn(tuple_list):
-      user_titles = torch.FloatTensor([x[0] for x in tuple_list])
-      user_abstracts = torch.FloatTensor([x[1] for x in tuple_list])
-      log_mask = torch.FloatTensor([x[2] for x in tuple_list])
-      news_titles = torch.FloatTensor([x[3] for x in tuple_list])
-      news_abstracts = torch.FloatTensor([x[4] for x in tuple_list])
-      targets = torch.FloatTensor([x[5] for x in tuple_list])
+    embedding_matrix = checkpoint['embedding_matrix']
+    module = importlib.import_module(f'model.{args.model}')
+    model = module.Model(args, embedding_matrix, len(category_dict), len(subcategory_dict))
+    model.load_state_dict(checkpoint['model_state_dict'])
 
-      return (user_titles, user_abstracts, log_mask, news_titles, news_abstracts, targets)
+    if args.enable_gpu:
+        model = model.cuda(rank)
+
+    if is_distributed:
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+
+    model.eval()
+
+
+    def custom_collate_fn(batch):
+        user_titles, user_abstracts, log_mask, news_titles, news_abstracts, targets = zip(*batch)
+
+        user_titles = pad_sequence([torch.tensor(t) for t in user_titles], batch_first=True, padding_value=0)
+        user_abstracts = pad_sequence([torch.tensor(a) for a in user_abstracts], batch_first=True, padding_value=0)
+        log_mask = torch.stack(
+            [torch.tensor(mask) for mask in log_mask])  # Convert log_mask to a Tensor before stacking
+        news_titles = pad_sequence([torch.tensor(t) for t in news_titles], batch_first=True, padding_value=0)
+        news_abstracts = pad_sequence([torch.tensor(a) for a in news_abstracts], batch_first=True, padding_value=0)
+
+        # Pad the targets to have the same length
+        targets = pad_sequence([torch.tensor(target) for target in targets], batch_first=True, padding_value=0)
+
+        logging.info("user_titles.shape", user_titles.shape)
+        logging.info("user_abstracts.shape", user_abstracts.shape)
+        logging.info("log_mask.shape", log_mask.shape)
+        logging.info("news_titles.shape", news_titles.shape)
+        logging.info("news_abstracts.shape", news_abstracts.shape)
+        logging.info("targets.shape", targets.shape)
+
+        return user_titles, user_abstracts, log_mask, news_titles, news_abstracts, targets
 
     data_file_path = os.path.join(args.test_data_dir, f"behaviors_{rank}.tsv")
 
     dataset = DatasetTest(data_file_path, news_index, news_combined, args)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size,collate_fn=collate_fn,drop_last=True)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, drop_last=True, collate_fn=custom_collate_fn)
+
+    logging.info('Testing...')
+    loss = 0.0
+    accuracy = 0.0
+    cnt = 0
 
     AUC = []
     MRR = []
     nDCG5 = []
     nDCG10 = []
 
-    for cnt, (user_titles, user_abstracts, log_mask, news_titles, news_abstracts, targets) in enumerate(dataloader):
-        if args.enable_gpu:
-            user_titles = user_titles.cuda(rank, non_blocking=True)
-            user_abstracts = user_abstracts.cuda(rank, non_blocking=True)
-            log_mask = log_mask.cuda(rank, non_blocking=True)
-            news_titles = news_titles.cuda(rank, non_blocking=True)
-            news_abstracts = news_abstracts.cuda(rank, non_blocking=True)
-            targets = targets.cuda(rank, non_blocking=True)
+    with torch.no_grad():
+        for user_titles, user_abstracts, log_mask, news_titles, news_abstracts, targets in dataloader:
+            if args.enable_gpu:
+                user_titles = user_titles.cuda(rank, non_blocking=True)
+                user_abstracts = user_abstracts.cuda(rank, non_blocking=True)
+                log_mask = log_mask.cuda(rank, non_blocking=True)
+                news_titles = news_titles.cuda(rank, non_blocking=True)
+                news_abstracts = news_abstracts.cuda(rank, non_blocking=True)
+                targets = targets.cuda(rank, non_blocking=True)
 
-        bz_loss, y_hat = model(user_titles, user_abstracts, log_mask, news_titles, news_abstracts)
+            bz_loss, y_hat = model(user_titles, user_abstracts, log_mask, news_titles, news_abstracts)
+            loss += bz_loss.data.float()
+            accuracy += utils.acc(targets, y_hat)
+            cnt += 1
 
         # Metric calculations
         auc = roc_auc_score(targets.cpu().numpy(), y_hat.cpu().numpy())
@@ -277,6 +291,8 @@ def test(rank, args):
     logging.info(f"Mean MRR: {np.mean(MRR)}")
     logging.info(f"Mean nDCG@5: {np.mean(nDCG5)}")
     logging.info(f"Mean nDCG@10: {np.mean(nDCG10)}")
+
+    logging.info(f'Test_loss: {loss.data / cnt}, Test_acc: {accuracy / cnt}')
 
 
 if __name__ == "__main__":
