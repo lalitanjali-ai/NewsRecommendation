@@ -34,7 +34,8 @@ class NewsEncoder(nn.Module):
             x: batch_size, word_num
             mask: batch_size, word_num
         '''
-        title = torch.narrow(x, -1, 0, self.num_words_title).long()
+        start = self.num_words_title - (self.use_category + self.use_category)
+        title = torch.narrow(x, -1, 0, start).long()
         word_vecs = F.dropout(self.embedding_matrix(title),
                               p=self.drop_rate,
                               training=self.training)
@@ -42,13 +43,13 @@ class NewsEncoder(nn.Module):
         title_vecs = self.attn(context_word_vecs, mask)
         all_vecs = [title_vecs]
 
-        start = self.num_words_title
+
         if self.use_category:
             category = torch.narrow(x, -1, start, 1).squeeze(dim=-1).long()
             category_vecs = self.category_dense(self.category_emb(category))
             all_vecs.append(category_vecs)
             start += 1
-        if self.use_subcategory:
+        if self.use_category:
             subcategory = torch.narrow(x, -1, start, 1).squeeze(dim=-1).long()
             subcategory_vecs = self.subcategory_dense(self.subcategory_emb(subcategory))
             all_vecs.append(subcategory_vecs)
