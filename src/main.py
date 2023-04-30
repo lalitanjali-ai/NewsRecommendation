@@ -169,12 +169,26 @@ def test(rank, args):
     assert ckpt_path is not None, 'No checkpoint found.'
     checkpoint = torch.load(ckpt_path, map_location='cpu')
 
+
+
     subcategory_dict = checkpoint['subcategory_dict']
     category_dict = checkpoint['category_dict']
     word_dict = checkpoint['word_dict']
+    news, news_index = read_news(os.path.join(args.test_data_dir, 'news.tsv'), args, mode='test')
+    news_title, news_category, news_subcategory = get_doc_input(
+        news, news_index, category_dict, subcategory_dict, word_dict, args)
+    news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+
+    if args.use_category:
+        args.num_words_title = args.num_words_title + 1
+    if args.use_subcategory:
+        args.num_words_title = args.num_words_title + 1
 
     dummy_embedding_matrix = np.zeros((len(word_dict) + 1, args.word_embedding_dim))
     module = importlib.import_module(f'model.{args.model}')
+
+
+
     model = module.Model(args, dummy_embedding_matrix, len(category_dict), len(subcategory_dict))
     model.load_state_dict(checkpoint['model_state_dict'])
     logging.info(f"Model loaded from {ckpt_path}")
@@ -185,10 +199,7 @@ def test(rank, args):
     model.eval()
     torch.set_grad_enabled(False)
 
-    news, news_index = read_news(os.path.join(args.test_data_dir, 'news.tsv'), args, mode='test')
-    news_title, news_category, news_subcategory = get_doc_input(
-        news, news_index, category_dict, subcategory_dict, word_dict, args)
-    news_combined = np.concatenate([x for x in [news_title, news_category, news_subcategory] if x is not None], axis=-1)
+
 
     news_dataset = NewsDataset(news_combined)
     news_dataloader = DataLoader(news_dataset,
@@ -298,7 +309,7 @@ if __name__ == "__main__":
     args.model_dir = '../model2'
     args.model = 'NAML'
     args.mode = 'test'
-    args.load_ckpt_name = None
+    args.load_ckpt_name = 'epoch-1.pt'
     args.use_category = True
     args.use_subcategory = True
     args.prepare = True
