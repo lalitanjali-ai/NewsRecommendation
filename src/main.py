@@ -41,7 +41,8 @@ def train(rank, args):
         utils.setuplogger()
         dist.init_process_group('nccl', world_size=args.nGPU, init_method='env://', rank=rank)
 
-    torch.cuda.set_device(rank)
+    if args.enable_gpu:
+        torch.cuda.set_device(rank)
 
     if args.use_topics:
         bert_topics_train = pd.read_csv("bert_topics/train_small_bert_topics.tsv", sep='\t')
@@ -130,27 +131,27 @@ def train(rank, args):
             bz_loss.backward()
             optimizer.step()
 
-            if cnt % args.log_steps == 0:
-                logging.info(
-                    '[{}] Ed: {}, train_loss: {:.5f}, acc: {:.5f}'.format(
-                        rank, cnt * args.batch_size, loss.data / cnt, accuary / cnt)
-                )
-
-            if rank == 0 and cnt != 0 and cnt % args.save_steps == 0:
-                ckpt_path = os.path.join(args.model_dir, f'epoch-{ep + 1}-{cnt}.pt')
-                torch.save(
-                    {
-                        'model_state_dict':
-                            {'.'.join(k.split('.')[1:]): v for k, v in model.state_dict().items()}
-                            if is_distributed else model.state_dict(),
-                        'category_dict': category_dict,
-                        'word_dict': word_dict,
-                        'subcategory_dict': subcategory_dict,
-                        'abs_word_dict': abs_word_dict,
-                        'embedding_matrix': embedding_matrix,
-
-                    }, ckpt_path)
-                logging.info(f"Model saved to {ckpt_path}.")
+            # if cnt % args.log_steps == 0:
+            #     logging.info(
+            #         '[{}] Ed: {}, train_loss: {:.5f}, acc: {:.5f}'.format(
+            #             rank, cnt * args.batch_size, loss.data / cnt, accuary / cnt)
+            #     )
+            #
+            # if rank == 0 and cnt != 0 and cnt % args.save_steps == 0:
+            #     ckpt_path = os.path.join(args.model_dir, f'epoch-{ep + 1}-{cnt}.pt')
+            #     torch.save(
+            #         {
+            #             'model_state_dict':
+            #                 {'.'.join(k.split('.')[1:]): v for k, v in model.state_dict().items()}
+            #                 if is_distributed else model.state_dict(),
+            #             'category_dict': category_dict,
+            #             'word_dict': word_dict,
+            #             'subcategory_dict': subcategory_dict,
+            #             'abs_word_dict': abs_word_dict,
+            #             'embedding_matrix': embedding_matrix,
+            #
+            #         }, ckpt_path)
+            #     logging.info(f"Model saved to {ckpt_path}.")
 
         logging.info('Training finish.')
 
@@ -165,7 +166,7 @@ def train(rank, args):
                     'subcategory_dict': subcategory_dict,
                     'word_dict': word_dict,
                     'abs_word_dict': abs_word_dict,
-                    'embedding_matrix': embedding_matrix,
+                    # 'embedding_matrix': embedding_matrix,
 
                 }, ckpt_path)
             logging.info(f"Model saved to {ckpt_path}.")
@@ -182,12 +183,20 @@ def test(rank, args):
         utils.setuplogger()
         dist.init_process_group('nccl', world_size=args.nGPU, init_method='env://', rank=rank)
 
-    torch.cuda.set_device(rank)
 
     if args.use_topics:
         bert_topics_test = pd.read_csv("bert_topics/val_small_bert_topics.tsv", sep='\t')
 
-    news, news_index, category_dict, subcategory_dict, word_dict, abs_word_dict = read_news(
+    # Load model from checkpoint
+    ckpt_path = utils.get_checkpoint(args.model_dir, args.load_ckpt_name)
+    checkpoint = torch.load(ckpt_path, map_location='cpu')
+
+    subcategory_dict = checkpoint['subcategory_dict']
+    category_dict = checkpoint['category_dict']
+    word_dict = checkpoint['word_dict']
+    abs_word_dict = checkpoint['abs_word_dict']
+
+    news, news_index  = read_news(
         os.path.join(args.test_data_dir, 'news.tsv'), args, mode='test', bert_topics_train=bert_topics_test)
 
     news_title, news_category, news_subcategory, news_abstract = get_doc_input(
@@ -205,13 +214,13 @@ def test(rank, args):
     else:
         news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
 
-    # Load model from checkpoint
-    ckpt_path = utils.get_checkpoint(args.model_dir, args.load_ckpt_name)
-    checkpoint = torch.load(ckpt_path, map_location='cpu')
 
-    embedding_matrix = checkpoint['embedding_matrix']
+
+    # embedding_matrix = checkpoint['embedding_matrix']
+    dummy_embedding_matrix = np.zeros((len(word_dict) + 1, args.word_embedding_dim))
+
     module = importlib.import_module(f'model.{args.model}')
-    model = module.Model(args, embedding_matrix, len(category_dict), len(subcategory_dict))
+    model = module.Model(args, dummy_embedding_matrix, len(category_dict), len(subcategory_dict))
     model.load_state_dict(checkpoint['model_state_dict'])
 
     if args.enable_gpu:
@@ -220,7 +229,23 @@ def test(rank, args):
     if is_distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
 
+
     model.eval()
+
+    news_dataset = NewsDataset(news_combined)
+    news_dataloader = DataLoader(news_dataset,
+                                 batch_size=args.batch_size,
+                                 num_workers=4)
+
+    news_scoring = []
+    with torch.no_grad():
+        for input_ids in tqdm(news_dataloader):
+            if args.enable_gpu:
+                input_ids = input_ids.cuda(rank)
+            b_size, d_size = input_ids.shape
+            news_vec = model.news_encoder(input_ids[:b_size, :d_size//2], input_ids[:b_size, d_size//2:])
+            news_vec = news_vec.to(torch.device("cpu")).detach().numpy()
+            news_scoring.extend(news_vec)
 
 
     def custom_collate_fn(batch):
@@ -247,7 +272,7 @@ def test(rank, args):
 
     data_file_path = os.path.join(args.test_data_dir, f"behaviors_{rank}.tsv")
 
-    dataset = DatasetTest(data_file_path, news_index, news_combined, args)
+    dataset = DatasetTest(data_file_path, news_index, news_scoring, args)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, drop_last=True, collate_fn=custom_collate_fn)
 
     logging.info('Testing...')
@@ -304,6 +329,14 @@ if __name__ == "__main__":
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '8888'
     Path(args.model_dir).mkdir(parents=True, exist_ok=True)
+    args.model_dir = '../model'
+    args.model = 'NRMS_abstract'
+    args.mode = 'test'
+    args.load_ckpt_name = 'epoch-1.pt'
+    args.enable_gpu = False
+    args.use_category = False
+    args.use_subcategory = False
+    args.prepare = True
 
     if args.word_embedding_type == 'bert':
         args.word_embedding_dim == 768
