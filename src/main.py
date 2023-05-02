@@ -247,6 +247,8 @@ def test(rank, args):
             news_vec = news_vec.to(torch.device("cpu")).detach().numpy()
             news_scoring.extend(news_vec)
 
+    news_scoring = np.array(news_scoring)
+
 
     def collate_fn(tuple_list):
         log_vecs = torch.FloatTensor([x[0] for x in tuple_list])

@@ -208,11 +208,10 @@ class DatasetTest(DatasetTrain):
         self.news_scoring = news_scoring
         self.args = args
 
+    def trans_to_nindex(self, nids):
+        return [self.news_index[i] if i in self.news_index else 0 for i in nids]
+
     def line_mapper(self, line):
-
-
-
-
 
         line = line.strip().split("\t")
         click_docs = line[3].split()
