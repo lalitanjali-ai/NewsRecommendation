@@ -18,5 +18,6 @@ transformers
 sentence_transformers
 bertopic
 matplotlib
-
+ipykernel
+ipywidgets
 
