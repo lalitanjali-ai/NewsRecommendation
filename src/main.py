@@ -136,7 +136,7 @@ def train(rank, args):
             bz_loss.backward()
             optimizer.step()
 
-        train_losses.append(loss.data / cnt) # Append the loss for the current epoch
+        train_losses.append(loss.data / cnt)  # Append the loss for the current epoch
 
         logging.info('Training finish.')
 
@@ -151,12 +151,28 @@ def train(rank, args):
                     'subcategory_dict': subcategory_dict,
                     'word_dict': word_dict,
                     'abs_word_dict': abs_word_dict,
-                    # 'embedding_matrix': embedding_matrix,
 
                 }, ckpt_path)
+
+            train_loss_path = os.path.join(args.model_dir, 'train_loss.pt')
+
+            torch.save(
+                {
+                    'training_losses': train_losses,
+                }, train_loss_path)
+
             logging.info(f"Model saved to {ckpt_path}.")
 
     return train_losses
+
+
+def save_test_metrics_to_csv(test_metrics, output_file):
+    with open(output_file, mode='w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['AUC', 'MRR', 'nDCG5', 'nDCG10'])
+        for metric in test_metrics:
+            writer.writerow(metric)
+
 
 def test(rank, args):
     if rank is None:
@@ -168,7 +184,6 @@ def test(rank, args):
     if is_distributed:
         utils.setuplogger()
         dist.init_process_group('nccl', world_size=args.nGPU, init_method='env://', rank=rank)
-
 
     if args.use_topics:
         bert_topics_test = pd.read_csv("bert_topics/val_small_bert_topics.tsv", sep='\t')
@@ -182,7 +197,7 @@ def test(rank, args):
     word_dict = checkpoint['word_dict']
     abs_word_dict = checkpoint['abs_word_dict']
 
-    news, news_index  = read_news(
+    news, news_index = read_news(
         os.path.join(args.test_data_dir, 'news.tsv'), args, mode='test', bert_topics_train=bert_topics_test)
 
     news_title, news_category, news_subcategory, news_abstract = get_doc_input(
@@ -200,8 +215,6 @@ def test(rank, args):
     else:
         news_combined = np.concatenate([x for x in [news_title] if x is not None], axis=-1)
 
-
-
     # embedding_matrix = checkpoint['embedding_matrix']
     dummy_embedding_matrix = np.zeros((len(word_dict) + 1, args.word_embedding_dim))
 
@@ -214,7 +227,6 @@ def test(rank, args):
 
     if is_distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
-
 
     model.eval()
 
@@ -229,12 +241,11 @@ def test(rank, args):
             if args.enable_gpu:
                 input_ids = input_ids.cuda(rank)
             b_size, d_size = input_ids.shape
-            news_vec = model.news_encoder(input_ids[:b_size, :d_size//2], input_ids[:b_size, d_size//2:])
+            news_vec = model.news_encoder(input_ids[:b_size, :d_size // 2], input_ids[:b_size, d_size // 2:])
             news_vec = news_vec.to(torch.device("cpu")).detach().numpy()
             news_scoring.extend(news_vec)
 
     news_scoring = np.array(news_scoring)
-
 
     def collate_fn(tuple_list):
         log_vecs = torch.FloatTensor([x[0] for x in tuple_list])
@@ -306,7 +317,12 @@ def test(rank, args):
     else:
         print_metrics('*', local_sample_num, get_mean([AUC, MRR, nDCG5, nDCG10]))
 
+    # Save the test_metrics to a CSV file
+    test_metrics_path = os.path.join(args.model_dir, 'test_metrics.csv')
+    save_test_metrics_to_csv(test_metrics, test_metrics_path)
+
     return test_metrics
+
 
 def plot_train_loss_curves(train_losses):
     plt.figure()
@@ -316,18 +332,26 @@ def plot_train_loss_curves(train_losses):
     plt.legend()
     plt.savefig('train_loss_curve.png')
 
-def plot_test_loss_curves(train_losses):
 
+def plot_test_loss_curves(test_metrics):
     plt.figure()
+
+    # Calculate the mean for each metric separately
     test_metrics_mean = np.mean(test_metrics, axis=0)
-    plt.plot(test_metrics_mean[:, 0], label='AUC')
-    plt.plot(test_metrics_mean[:, 1], label='MRR')
-    plt.plot(test_metrics_mean[:, 2], label='nDCG5')
-    plt.plot(test_metrics_mean[:, 3], label='nDCG10')
+    auc_mean = test_metrics_mean[0]
+    mrr_mean = test_metrics_mean[1]
+    ndcg5_mean = test_metrics_mean[2]
+    ndcg10_mean = test_metrics_mean[3]
+
+    plt.plot(auc_mean, label='AUC')
+    plt.plot(mrr_mean, label='MRR')
+    plt.plot(ndcg5_mean, label='nDCG5')
+    plt.plot(ndcg10_mean, label='nDCG10')
     plt.xlabel('Batch')
     plt.ylabel('Metrics')
     plt.legend()
     plt.savefig('test_metrics_curve.png')
+
 
 if __name__ == "__main__":
     # utils.setuplogger()
@@ -402,6 +426,6 @@ if __name__ == "__main__":
 
         if args.nGPU == 1:
             test_metrics = test(None, args)
-            plot_test_loss_curves(train_losses)
+            plot_test_loss_curves(test_metrics)
         else:
             torch.multiprocessing.spawn(test, nprocs=args.nGPU, args=(args,))
