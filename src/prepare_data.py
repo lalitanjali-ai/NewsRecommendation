@@ -18,7 +18,7 @@ def prepare_training_data(train_data_dir, nGPU, npratio, seed):
     behavior_file_path = os.path.join(train_data_dir, 'behaviors.tsv')
     with open(behavior_file_path, 'r', encoding='utf-8') as f:
         for line in tqdm(f):
-            iid, uid, time, history, imp = line.strip().split('\t')
+            iid, uid, time, history, imp = line.strip().split('\t',maxsplit=4)
             impressions = [x.split('-') for x in imp.split(' ')]
             pos, neg = [], []
             for news_ID, label in impressions:

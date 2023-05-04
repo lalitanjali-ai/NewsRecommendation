@@ -1,5 +1,5 @@
 import argparse
-import utils
+import utils as utils
 
 
 def parse_args():
@@ -19,12 +19,12 @@ def parse_args():
     parser.add_argument(
         "--train_data_dir",
         type=str,
-        default="../data/MINDsmall_train",
+        default="./data/MINDsmall_train",
     )
     parser.add_argument(
         "--test_data_dir",
         type=str,
-        default="../data/MINDsmall_dev",
+        default="./data/MINDsmall_dev",
     )
     parser.add_argument("--model_dir", type=str, default='../model')
     parser.add_argument("--batch_size", type=int, default=32)
